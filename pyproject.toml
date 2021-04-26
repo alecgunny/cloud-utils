@@ -1,0 +1,22 @@
+[tool.black]
+line-length = 82
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+known_first_party = ["cloud_utils"]
+known_third_party = ["attr", "google", "kubernetes", "requests", "setuptools", "yaml"]
+multi_line_output = 3
+include_trailing_comma = true

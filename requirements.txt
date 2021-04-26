@@ -1,0 +1,4 @@
+attrs
+google-cloud-storage
+google-cloud-container
+kubernetes
