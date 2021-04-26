@@ -12,13 +12,8 @@ from google.oauth2 import service_account
 from cloud_utils.k8s import K8sApiClient, deploy_file
 from cloud_utils.utils import wait_for
 
-OAUTH_SCOPES = [
-    "https://www.googleapis.com/auth/devstorage.read_only",
-    "https://www.googleapis.com/auth/logging.write",
-    "https://www.googleapis.com/auth/monitoring",
-    "https://www.googleapis.com/auth/service.management.readonly",
-    "https://www.googleapis.com/auth/servicecontrol",
-    "https://www.googleapis.com/auth/trace.append",
+_credentials_type = typing.Optional[
+    typing.Union[str, service_account.Credentials]
 ]
 
 
@@ -26,7 +21,7 @@ def snakeify(name: str) -> str:
     return re.sub("(?<!^)(?=[A-Z])", "_", name).lower()
 
 
-def make_credentials(service_account_key_file):
+def make_credentials(service_account_key_file: str):
     # use GKE credentials to create Kubernetes
     # configuration for cluster
     credentials = service_account.Credentials.from_service_account_file(
@@ -38,7 +33,9 @@ def make_credentials(service_account_key_file):
 
 
 class ThrottledClient:
-    def __init__(self, credentials=None, throttle_secs=1.0):
+    def __init__(
+        self, credentials: _credentials_type = None, throttle_secs: float = 1.0
+    ):
         if isinstance(credentials, str):
             credentials = make_credentials(credentials)
 
@@ -307,7 +304,7 @@ class Cluster(ManagerResource):
     def remove_deployment(self, name: str, namespace: str = "default"):
         return self.k8s_client.remove_deployment(name, namespace)
 
-    def deploy_gpu_drivers(self):
+    def deploy_gpu_drivers(self) -> None:
         with deploy_file(
             "nvidia-driver-installer/cos/daemonset-preloaded.yaml",
             repo="GoogleCloudPlatform/container-engine-accelerators",
@@ -318,15 +315,10 @@ class Cluster(ManagerResource):
         self.k8s_client.wait_for_daemon_set(name="nvidia-driver-installer")
 
 
-_credentials_type = typing.Optional[
-    typing.Union[str, service_account.Credentials]
-]
-
-
 class GKEClusterManager(ManagerResource):
     def __init__(
         self, project: str, zone: str, credentials: _credentials_type = None
-    ):
+    ) -> None:
         parent = ThrottledClient(credentials)
         name = f"projects/{project}/locations/{zone}"
         super().__init__(name, parent)
@@ -340,7 +332,9 @@ class GKEClusterManager(ManagerResource):
         return self._name
 
 
-def create_gpu_node_pool_config(vcpus: int, gpus: int, gpu_type: str, **kwargs):
+def create_gpu_node_pool_config(
+    vcpus: int, gpus: int, gpu_type: str, **kwargs
+) -> container.NodeConfig:
     if math.log2(vcpus) % 1 != 0 or vcpus != 96:
         raise ValueError(f"Can't configure node pool with {vcpus} vcpus")
 
