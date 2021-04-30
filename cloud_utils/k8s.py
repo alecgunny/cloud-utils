@@ -37,21 +37,20 @@ class K8sApiClient:
     def __init__(self, cluster: "Cluster"):
         try:
             response = cluster.get()
-        except Exception as e:
-            try:
-                if e.code == 404:
-                    raise RuntimeError(
-                        f"Cluster {cluster.name} not currently deployed"
-                    )
-                raise
-            except AttributeError:
-                raise e
+        except requests.HTTPError as e:
+            if e.code == 404:
+                raise RuntimeError(
+                    f"Cluster {cluster.name} not currently deployed"
+                )
+            raise
 
         # create configuration using bare minimum info
         configuration = kubernetes.client.Configuration()
         configuration.host = f"https://{response.endpoint}"
+
         with NamedTemporaryFile(delete=False) as ca_cert:
-            ca_cert.write(b64decode(response.master_auth.cluster_ca_certificate))
+            certificate = response.master_auth.cluster_ca_certificate
+            ca_cert.write(b64decode(certificate))
         configuration.ssl_ca_cert = ca_cert.name
         configuration.api_key_prefix["authorization"] = "Bearer"
 
@@ -72,25 +71,25 @@ class K8sApiClient:
         self._client = kubernetes.client.ApiClient(configuration)
 
     def create_from_yaml(self, file: str):
-        return kubernetes.utils.create_from_yaml(self._client, file)
+        with self._maybe_refresh() as body:
+            response = kubernetes.utils.create_from_yaml(self._client, file)
+        if body:
+            raise RuntimeError(f"Encountered exception {body}")
+        return response
 
     @contextmanager
     def _maybe_refresh(self):
         body = {}
         try:
             yield body
-        except Exception as e:
-            try:
-                body.update(yaml.safe_load(e.body))
-                if body["code"] == 401:
-                    if self._refresh:
-                        self.client.configuration.api_key[
-                            "authorization"
-                        ] = _get_service_account_access_token()
-                    else:
-                        raise RuntimeError("Unauthorized request to cluster")
-            except AttributeError:
-                raise e
+        except requests.HTTPError as e:
+            body.update(yaml.safe_load(e.body))
+            if body["code"] == 401:
+                if self._refresh:
+                    token = _get_service_account_access_token()
+                    self.client.configuration.api_key["authorization"] = token
+                else:
+                    raise RuntimeError("Unauthorized request to cluster")
 
     def remove_deployment(self, name: str, namespace: str = "default"):
         app_client = kubernetes.client.AppsV1Api(self._client)
@@ -247,7 +246,7 @@ def deploy_file(
         try:
             return str(values[varname])
         except KeyError:
-            raise ValueError("No value provided for wildcard {}".format(varname))
+            raise ValueError(f"No value provided for wildcard {varname}")
 
     yaml_content = re.sub("{{ .Values.[a-zA-Z0-9]+? }}", replace_fn, yaml_content)
 

@@ -5,6 +5,7 @@ import typing
 from contextlib import contextmanager
 
 import attr
+import requests
 from google.auth.transport.requests import Request as AuthRequest
 from google.cloud import container_v1 as container
 from google.oauth2 import service_account
@@ -21,12 +22,20 @@ def snakeify(name: str) -> str:
     return re.sub("(?<!^)(?=[A-Z])", "_", name).lower()
 
 
-def make_credentials(service_account_key_file: str):
-    # use GKE credentials to create Kubernetes
-    # configuration for cluster
+def make_credentials(
+    service_account_key_file: str,
+    scopes: typing.Optional[typing.List[str]] = None,
+):
+    """
+    Cheap wrapper around service account creation
+    class method to simplify a couple gotchas. Might
+    either be overkill or may be better built as a
+    class with more functionality, not sure yet.
+    """
+    scopes = scopes or ["https://www.googleapis.com/auth/cloud-platform"]
     credentials = service_account.Credentials.from_service_account_file(
         service_account_key_file,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        scopes=scopes,
     )
     credentials.refresh(AuthRequest())
     return credentials
@@ -55,7 +64,8 @@ class ThrottledClient:
         return ""
 
     def make_request(self, request, **kwargs):
-        request_fn_name = snakeify(type(request).__name__.replace("Request", ""))
+        request_type = type(request).__name__.replace("Request", "")
+        request_fn_name = snakeify(request_type)
         request_fn = getattr(self._client, request_fn_name)
         while (time.time() - self._last_request_time) < self.throttle_secs:
             time.sleep(0.01)
@@ -101,12 +111,9 @@ class Resource:
         create_request = create_request_cls(**kwargs)
         try:
             obj.client.make_request(create_request)
-        except Exception as e:
-            try:
-                if e.code != 409:
-                    raise
-            except AttributeError:
-                raise e
+        except requests.HTTPError as e:
+            if e.code != 409:
+                raise
         return obj
 
     def delete(self):
@@ -121,18 +128,13 @@ class Resource:
         get_request = get_request_cls(name=self.name)
         return self.client.make_request(get_request, timeout=timeout)
 
-    # TODO: start catching the specific HTTPException
-    # subclass. Is it just the one from werkzeug?
     def is_ready(self):
-        try:
-            status = self.get(timeout=5).status
-        except Exception:
-            # TODO: something to catch here?
-            raise
+        # TODO: what can go wrong here? What should we try to catch?
+        status = self.get(timeout=5).status
         if status == 2:
             return True
         elif status > 2:
-            raise RuntimeError
+            raise RuntimeError(f"Resource {self.name} has status {status}")
         return False
 
     def submit_delete(self):
@@ -142,23 +144,17 @@ class Resource:
         # need to
         try:
             self.delete()
-        except Exception as e:
-            try:
-                if e.code == 404:
-                    # resource is gone, we're good
-                    return True
-                elif e.code != 400:
-                    # 400 means resource is tied up, so
-                    # wait and try again in a bit. Otherwise,
-                    # raise an error
-                    raise
-                else:
-                    return False
-            except AttributeError:
-                # the exception didn't have a `.code`
-                # attribute, so evidently something
-                # else went wrong, raise it
-                raise e
+        except requests.HTTPError as e:
+            if e.code == 404:
+                # resource is gone, we're good
+                return True
+            elif e.code != 400:
+                # 400 means resource is tied up, so
+                # wait and try again in a bit. Otherwise,
+                # raise an error
+                raise
+            else:
+                return False
         else:
             # response went off ok, so we're good
             return True
@@ -168,22 +164,18 @@ class Resource:
         # be completed
         try:
             status = self.get(timeout=5).status
-        except Exception as e:
-            try:
-                if e.code == 404:
-                    # resource is gone, so we're good
-                    # to exit
-                    return True
-                # some other error occured, raise it
-                raise
-            except AttributeError:
-                # a non-HTTP error occurred, raise it
-                raise e
+        except requests.HTTPError as e:
+            if e.code == 404:
+                # resource is gone, so we're good
+                # to exit
+                return True
+            # some other error occured, raise it
+            raise
 
         if status > 4:
             # something bad happened to the resource,
             # raise the issue
-            raise RuntimeError(status)
+            raise RuntimeError(f"Resource {self.name} has status {status}")
         return False
 
 
@@ -219,6 +211,9 @@ class ManagerResource(Resource):
 
     @property
     def resources(self):
+        # TODO: in light of the `managed_resource_type` property,
+        # can sub-resources rightfully belong to resources higher
+        # up the tree? I don't think we need this recursion
         resources = self._resources.copy()
         for resource_name, resource in self._resources.items():
             try:

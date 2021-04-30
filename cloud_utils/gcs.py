@@ -3,10 +3,14 @@ import shutil
 import typing
 from functools import lru_cache
 
+import requests
 from google.cloud import storage
 from google.oauth2 import service_account
 
 
+# TODO: this should probably be replaced with something
+# more general, and the ModelRepo can be handled as a
+# file system backend in https://github.com/alecgunny/exportlib
 class GCSModelRepo:
     def __init__(
         self,
@@ -21,18 +25,14 @@ class GCSModelRepo:
     def bucket(self):
         try:
             return self._client.get_bucket(self.bucket_name)
-        except Exception as e:
-            try:
-                if e.code == 404:
-                    try:
-                        return self._client.create_bucket(self.bucket_name)
-                    except Exception as e:
-                        # TODO: some check on whether this already exists
-                        raise e
-                else:
+        except requests.HTTPError as e:
+            if e.code == 404:
+                try:
+                    return self._client.create_bucket(self.bucket_name)
+                except Exception:
+                    # TODO: some check on whether this already exists
                     raise
-            except AttributeError:
-                raise e
+            raise
 
     def export_repo(
         self, repo_dir: str, start_fresh: bool = True, clear: bool = True
