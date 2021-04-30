@@ -13,6 +13,13 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/alecgunny/cloud-utils",
     packages=setuptools.find_packages(),
+    install_requires=[
+        "attrs",
+        "google-cloud-container",
+        "google-cloud-storage",
+        "requests",
+        "kubernetes",
+    ],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
