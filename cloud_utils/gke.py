@@ -6,7 +6,6 @@ from contextlib import contextmanager
 
 import attr
 import google
-import requests
 from google.auth.transport.requests import Request as AuthRequest
 from google.cloud import container_v1 as container
 from google.oauth2 import service_account
@@ -112,7 +111,7 @@ class Resource:
         create_request = create_request_cls(**kwargs)
         try:
             obj.client.make_request(create_request)
-        except requests.HTTPError as e:
+        except google.api_core.exceptions.GoogleAPICallError as e:
             if e.code != 409:
                 raise
         return obj
@@ -145,7 +144,7 @@ class Resource:
         # need to
         try:
             self.delete()
-        except requests.HTTPError as e:
+        except google.api_core.exceptions.GoogleAPICallError as e:
             if e.code == 404:
                 # resource is gone, we're good
                 return True
@@ -165,7 +164,7 @@ class Resource:
         # be completed
         try:
             status = self.get(timeout=5).status
-        except requests.HTTPError as e:
+        except google.api_core.exceptions.GoogleAPICallError as e:
             if e.code == 404:
                 # resource is gone, so we're good
                 # to exit
