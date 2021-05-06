@@ -282,7 +282,7 @@ class ManagerResource(Resource):
 @attr.s
 class Cluster(ManagerResource):
     def __attrs_post_init__(self):
-        self._k8s_client = K8sApiClient(self)
+        self._k8s_client = None
         super().__attrs_post_init__()
 
     @property
@@ -291,6 +291,8 @@ class Cluster(ManagerResource):
 
     @property
     def k8s_client(self):
+        if self._k8s_client is None:
+            self._k8s_client = K8sApiClient(self)
         return self._k8s_client
 
     def deploy(self, file: str):
