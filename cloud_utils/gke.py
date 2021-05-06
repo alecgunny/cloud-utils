@@ -5,6 +5,7 @@ import typing
 from contextlib import contextmanager
 
 import attr
+import google
 import requests
 from google.auth.transport.requests import Request as AuthRequest
 from google.cloud import container_v1 as container
@@ -196,7 +197,11 @@ class ManagerResource(Resource):
             self.client._client,
             "list_{}s".format(snakeify(self.managed_resource_type.__name__)),
         )
-        response = list_resource_fn(list_resource_request)
+        try:
+            response = list_resource_fn(list_resource_request)
+        except google.api_core.exceptions.NotFound:
+            return
+
         resources = getattr(
             response, snakeify(self.managed_resource_type.__name__) + "s"
         )
