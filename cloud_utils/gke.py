@@ -129,7 +129,11 @@ class Resource:
 
     def is_ready(self):
         # TODO: what can go wrong here? What should we try to catch?
-        status = self.get(timeout=5).status
+        try:
+            status = self.get(timeout=5).status
+        except google.api_core.exceptions.NotFound:
+            raise ValueError(f"Couldn't find existing resource {self.name}")
+
         if status == 2:
             return True
         elif status > 2:
@@ -157,13 +161,14 @@ class Resource:
         # now wait for the delete request to
         # be completed
         try:
-            status = self.get(timeout=5).status
+            response = self.get(timeout=5)
         except google.api_core.exceptions.NotFound:
             return True
-        if status > 4:
-            # something bad happened to the resource,
-            # raise the issue
-            raise RuntimeError(f"Resource {self.name} has status {status}")
+        if response.status > 4:
+            raise RuntimeError(
+                f"Resource {self.name} reached status {response.status} "
+                f"while deleting with conditions {response.conditions}"
+            )
         return False
 
 
