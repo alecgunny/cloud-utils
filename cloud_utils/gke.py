@@ -324,7 +324,7 @@ class GKEClusterManager(ManagerResource):
 def create_gpu_node_pool_config(
     vcpus: int, gpus: int, gpu_type: str, **kwargs
 ) -> container.NodeConfig:
-    if math.log2(vcpus) % 1 != 0 or vcpus != 96:
+    if (math.log2(vcpus) % 1 != 0 and vcpus != 96) or vcpus > 96:
         raise ValueError(f"Can't configure node pool with {vcpus} vcpus")
 
     if gpus < 1 or gpus > 8:
