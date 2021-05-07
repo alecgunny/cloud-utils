@@ -125,26 +125,26 @@ class Resource:
     def get(self, timeout=None):
         get_request_cls = getattr(container, f"Get{self.resource_type}Request")
         get_request = get_request_cls(name=self.name)
-        return self.client.make_request(get_request, timeout=timeout)
-
-    def is_ready(self):
-        # TODO: what can go wrong here? What should we try to catch?
         try:
-            status = self.get(timeout=5).status
+            return self.client.make_request(get_request, timeout=timeout)
         except google.api_core.exceptions.NotFound:
-            raise ValueError(f"Couldn't find existing resource {self.name}")
+            raise ValueError(f"Couldn't get resource {self.name}")
 
+    def is_ready(self) -> bool:
+        status = self.get(timeout=5).status
         if status == 2:
             return True
         elif status > 2:
             raise RuntimeError(f"Resource {self.name} has status {status}")
         return False
 
-    def submit_delete(self):
-        # first try to submit the delete request,
-        # possibly waiting for the resource to
-        # become available to be deleted if we
-        # need to
+    def submit_delete(self) -> bool:
+        """
+        Attempt to submit a delete request for a resource.
+        Returns `True` if the request is successfully
+        submitted or if the resource can't be found,
+        and `False` if the request can't be submitted
+        """
         try:
             self.delete()
             return True
@@ -152,17 +152,19 @@ class Resource:
             # resource is gone, so we're good
             return True
         except google.api_core.exceptions.BadRequest:
-            # 400 means resource is tied up, so
-            # wait and try again in a bit. Otherwise,
-            # raise an error
+            # Resource is tied up, so indicate that
+            # the user will need to try again later
             return False
 
-    def is_deleted(self):
-        # now wait for the delete request to
-        # be completed
+    def is_deleted(self) -> bool:
+        """
+        check if a submitted delete request has completed
+        """
         try:
             response = self.get(timeout=5)
         except google.api_core.exceptions.NotFound:
+            # couldn't find the resource, so assume
+            # the deletion went off swimmingly
             return True
         if response.status > 4:
             raise RuntimeError(
