@@ -36,24 +36,28 @@ def wait_for(
 
     i, exit_pad = 0, 0
     value = None
-    while t.is_alive():
-        value = check_q()
-        if msg is None:
-            continue
+    try:
+        while t.is_alive():
+            value = check_q()
+            if msg is None:
+                continue
 
-        dots = "." * (i + 1)
-        spaces = " " * (2 - i)
-        print(msg + dots + spaces, end="\r", flush=True)
-        time.sleep(0.5)
-        i = (i + 1) % 3
+            dots = "." * (i + 1)
+            spaces = " " * (2 - i)
+            print(msg + dots + spaces, end="\r", flush=True)
+            time.sleep(0.5)
+            i = (i + 1) % 3
 
-        exit_pad = max(exit_pad, len(msg + dots))
+            exit_pad = max(exit_pad, len(msg + dots))
 
-    if value is None:
-        value = check_q()
-
-    exit_msg = exit_msg or ""
-    exit_msg += " " * (exit_pad - len(exit_msg))
-    print(exit_msg)
+        if value is None:
+            value = check_q()
+    except Exception:
+        exit_msg = "Encountered error in callback"
+        raise
+    finally:
+        if exit_msg is not None:
+            exit_msg = exit_msg + " " * (exit_pad - len(exit_msg))
+            print(exit_msg)
 
     return value

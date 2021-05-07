@@ -131,12 +131,18 @@ class Resource:
         except google.api_core.exceptions.NotFound:
             raise ValueError(f"Couldn't get resource {self.name}")
 
+    def _raise_bad_status(self, response):
+        raise RuntimeError(
+            f"Resource {self.name} reached status {response.status} "
+            f"while deleting with conditions {response.conditions}"
+        )
+
     def is_ready(self) -> bool:
-        status = self.get(timeout=5).status
-        if status == 2:
+        response = self.get(timeout=5)
+        if response.status == 2:
             return True
-        elif status > 2:
-            raise RuntimeError(f"Resource {self.name} has status {status}")
+        elif response.status > 2:
+            self._raise_bad_status(response)
         return False
 
     def submit_delete(self) -> bool:
@@ -170,10 +176,7 @@ class Resource:
             # the deletion went off swimmingly
             return True
         if response.status > 4:
-            raise RuntimeError(
-                f"Resource {self.name} reached status {response.status} "
-                f"while deleting with conditions {response.conditions}"
-            )
+            self._raise_bad_status(response)
         return False
 
 
