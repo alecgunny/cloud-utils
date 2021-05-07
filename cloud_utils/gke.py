@@ -125,6 +125,7 @@ class Resource:
     def get(self, timeout=None):
         get_request_cls = getattr(container, f"Get{self.resource_type}Request")
         get_request = get_request_cls(name=self.name)
+
         try:
             return self.client.make_request(get_request, timeout=timeout)
         except google.api_core.exceptions.NotFound:
@@ -162,7 +163,9 @@ class Resource:
         """
         try:
             response = self.get(timeout=5)
-        except google.api_core.exceptions.NotFound:
+        except ValueError as e:
+            if str(e) != f"Couldn't get resource {self.name}":
+                raise
             # couldn't find the resource, so assume
             # the deletion went off swimmingly
             return True
@@ -182,23 +185,20 @@ class NodePool(Resource):
 class ManagerResource(Resource):
     def __attrs_post_init__(self):
         self._resources = {}
-        list_request_cls = getattr(
-            container, f"List{self.managed_resource_type.__name__}sRequest"
-        )
-        list_resource_request = list_request_cls(parent=self.name)
 
-        list_resource_fn = getattr(
-            self.client._client,
-            "list_{}s".format(snakeify(self.managed_resource_type.__name__)),
-        )
+        mrts = self.managed_resource_type.__name__ + "s"
+        snaked = snakeify(mrts)
+
+        list_request_cls = getattr(container, f"List{mrts}Request")
+        list_resource_request = list_request_cls(parent=self.name)
+        list_resource_fn = getattr(self.client._client, f"list_{snaked}")
+
         try:
             response = list_resource_fn(list_resource_request)
         except google.api_core.exceptions.NotFound:
             return
 
-        resources = getattr(
-            response, snakeify(self.managed_resource_type.__name__) + "s"
-        )
+        resources = getattr(response, snaked)
         for resource in resources:
             self._resources[resource.name] = self.managed_resource_type(
                 resource.name, self
@@ -290,6 +290,13 @@ class Cluster(ManagerResource):
 
     @property
     def k8s_client(self):
+        # try to create the client this way because otherwise we
+        # would need to wait until the cluster is ready at
+        # initialization time in order to get the endpoint. If you're
+        # not going to call `wait_for(cluster.is_ready)`, make sure to
+        # wrap this in a catch for a RuntimeError
+        # TODO: is it worth starting to introduce custom errors here
+        # to make catching more intelligible?
         if self._k8s_client is None:
             self._k8s_client = K8sApiClient(self)
         return self._k8s_client
