@@ -111,9 +111,8 @@ class Resource:
         create_request = create_request_cls(**kwargs)
         try:
             obj.client.make_request(create_request)
-        except google.api_core.exceptions.GoogleAPICallError as e:
-            if e.code != 409:
-                raise
+        except google.api_core.exceptions.AlreadyExists:
+            pass
         return obj
 
     def delete(self):
@@ -144,34 +143,23 @@ class Resource:
         # need to
         try:
             self.delete()
-        except google.api_core.exceptions.GoogleAPICallError as e:
-            if e.code == 404:
-                # resource is gone, we're good
-                return True
-            elif e.code != 400:
-                # 400 means resource is tied up, so
-                # wait and try again in a bit. Otherwise,
-                # raise an error
-                raise
-            else:
-                return False
-        else:
-            # response went off ok, so we're good
             return True
+        except google.api_core.exceptions.NotFound:
+            # resource is gone, so we're good
+            return True
+        except google.api_core.exceptions.BadRequest:
+            # 400 means resource is tied up, so
+            # wait and try again in a bit. Otherwise,
+            # raise an error
+            return False
 
     def is_deleted(self):
         # now wait for the delete request to
         # be completed
         try:
             status = self.get(timeout=5).status
-        except google.api_core.exceptions.GoogleAPICallError as e:
-            if e.code == 404:
-                # resource is gone, so we're good
-                # to exit
-                return True
-            # some other error occured, raise it
-            raise
-
+        except google.api_core.exceptions.NotFound:
+            return True
         if status > 4:
             # something bad happened to the resource,
             # raise the issue
