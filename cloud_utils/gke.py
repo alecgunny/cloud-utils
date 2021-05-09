@@ -175,7 +175,7 @@ class Resource:
             # couldn't find the resource, so assume
             # the deletion went off swimmingly
             return True
-        if response.status > 4:
+        if response.status > 5:
             self._raise_bad_status(response)
         return False
 
