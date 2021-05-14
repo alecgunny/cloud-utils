@@ -165,7 +165,10 @@ class K8sApiClient:
             except kubernetes.client.ApiException:
                 raise RuntimeError(f"Service {name} no longer exists!")
 
-            ip = response.status.load_balancer.ingress[0].ip
+            try:
+                ip = response.status.load_balancer.ingress[0].ip
+            except TypeError:
+                return False
             return ip or False
 
         return wait_for(
