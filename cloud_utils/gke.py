@@ -93,7 +93,7 @@ class Resource:
         return self.parent.name + "/{}/{}".format(camel, self._name)
 
     @classmethod
-    def create(cls, resource, parent):
+    def create(cls, resource, parent, **kwargs):
         resource_type = type(resource).__name__
         if resource_type == "Cluster":
             cls = Cluster
@@ -102,7 +102,7 @@ class Resource:
         else:
             raise TypeError(f"Unknown GKE resource type {resource_type}")
 
-        obj = cls(resource.name, parent)
+        obj = cls(resource.name, parent, **kwargs)
         create_request_cls = getattr(
             container, f"Create{obj.resource_type}Request"
         )
@@ -181,8 +181,33 @@ class Resource:
         return False
 
 
+@attr.s(auto_attribs=True)
 class NodePool(Resource):
-    pass
+    timeout: typing.Optional[float] = None
+
+    def __attrs_post_init__(self):
+        self._init_time = time.time()
+
+    def is_ready(self):
+        response = self.get(timeout=5)
+        if response.status == 2:
+            return True
+        elif response.status == 6:
+            code = response.conditions[0].code
+            stockout = code == container.StatusCondition.Code.GCE_STOCKOUT
+            if not stockout:
+                self._raise_bad_status(response)
+            if (
+                self.timeout is None
+                or (time.time() > self._init_time) < self.timeout
+            ):
+                raise RuntimeError(
+                    f"Resource {self.name} encountered GCE stockout "
+                    "on creation and timed out"
+                )
+        elif response.status > 2:
+            self._raise_bad_status(response)
+        return False
 
 
 @attr.s
@@ -267,8 +292,8 @@ class ManagerResource(Resource):
         self._resources.pop(resource.name)
 
     @contextmanager
-    def manage_resource(self, resource, keep=False):
-        resource = self.create_resource(resource)
+    def manage_resource(self, resource, keep=False, **kwargs):
+        resource = self.create_resource(resource, **kwargs)
         resource_msg = self._make_resource_message(resource)
 
         try:
