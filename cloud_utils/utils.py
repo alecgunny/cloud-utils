@@ -1,3 +1,4 @@
+import logging
 import queue
 import threading
 import time
@@ -36,6 +37,7 @@ def wait_for(
 
     i, exit_pad = 0, 0
     value = None
+    logger = logging.info
     try:
         while t.is_alive():
             value = check_q()
@@ -54,10 +56,12 @@ def wait_for(
             value = check_q()
     except Exception:
         exit_msg = "Encountered error in callback"
+        logger = logging.error
         raise
     finally:
         if exit_msg is not None:
             exit_msg = exit_msg + " " * (exit_pad - len(exit_msg))
-            print(exit_msg)
-
+            logger(exit_msg)
+        else:
+            print(" " * exit_pad, end="\r", flush=True)
     return value

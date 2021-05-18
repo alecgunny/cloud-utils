@@ -1,3 +1,4 @@
+import logging
 import math
 import re
 import time
@@ -272,9 +273,13 @@ class ManagerResource(Resource):
 
         try:
             yield resource
-        except Exception:
+        except Exception as e:
             if not keep:
-                print(f"Encountered error, removing {resource_msg}")
+                logging.error(
+                    "Encountered error, removing {}: {}".format(
+                        resource_msg, str(e)
+                    )
+                )
             raise
         finally:
             if not keep:
