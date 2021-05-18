@@ -59,7 +59,8 @@ def wait_for(
         level = logging.ERROR
         raise
     finally:
+        # clear out the existing msg
         print(" " * exit_pad, end="\r", flush=True)
         if exit_msg is not None:
-            logging.log(exit_msg, level=level)
+            logging.log(level, exit_msg)
     return value
