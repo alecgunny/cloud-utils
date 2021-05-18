@@ -12,55 +12,57 @@ def wait_for(
 ):
     q = queue.Queue()
 
-    def target():
+    def target(msg):
         try:
             while True:
-                value = callback()
-                if value:
+                release = callback()
+                try:
+                    msg, release = release
+                except (TypeError, ValueError):
+                    pass
+
+                q.put((msg, release))
+                if release:
                     break
                 time.sleep(0.5)
-            q.put(value)
         except Exception as e:
-            q.put(e)
+            q.put((e, True))
 
-    def check_q():
-        try:
-            value = q.get_nowait()
-            if isinstance(value, Exception):
-                raise value
-            return value
-        except queue.Empty:
-            return None
-
-    t = threading.Thread(target=target)
+    t = threading.Thread(target=target, args=(msg,))
     t.start()
 
-    i, exit_pad = 0, 0
-    value = None
+    i, line_length = 0, 0
     level = logging.INFO
     try:
-        while t.is_alive():
-            value = check_q()
+        while True:
+            try:
+                msg, release = q.get_nowait()
+                if isinstance(msg, Exception):
+                    raise msg
+                elif release:
+                    break
+            except queue.Empty:
+                continue
+
             if msg is None:
                 continue
 
             dots = "." * (i + 1)
-            spaces = " " * (2 - i)
+            line_length = max(len(msg) + len(dots), line_length)
+            spaces = " " * (line_length - len(msg) - len(dots))
+
             print(msg + dots + spaces, end="\r", flush=True)
             time.sleep(0.5)
             i = (i + 1) % 3
 
-            exit_pad = max(exit_pad, len(msg + dots))
-
-        if value is None:
-            value = check_q()
     except Exception:
         exit_msg = "Encountered error in callback"
         level = logging.ERROR
         raise
     finally:
         # clear out the existing msg
-        print(" " * exit_pad, end="\r", flush=True)
+        print(" " * line_length, end="\r", flush=True)
         if exit_msg is not None:
             logging.log(level, exit_msg)
-    return value
+
+    return release
