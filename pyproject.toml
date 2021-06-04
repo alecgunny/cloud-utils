@@ -17,6 +17,6 @@ exclude = '''
 
 [tool.isort]
 known_first_party = ["cloud_utils"]
-known_third_party = ["attr", "google", "kubernetes", "requests", "setuptools", "yaml"]
+known_third_party = ["attr", "google", "kubernetes", "requests", "setuptools", "urllib3", "yaml"]
 multi_line_output = 3
 include_trailing_comma = true

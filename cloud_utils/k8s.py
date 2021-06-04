@@ -9,6 +9,7 @@ from tempfile import NamedTemporaryFile
 import kubernetes
 import requests
 import yaml
+from urllib3.exceptions import MaxRetryError
 
 from cloud_utils.utils import wait_for
 
@@ -128,6 +129,10 @@ class K8sApiClient:
                 )
             except kubernetes.client.ApiException:
                 raise RuntimeError(f"Deployment {name} no longer exists!")
+            except MaxRetryError:
+                time.sleep(1)
+                return False
+
             conditions = response.status.conditions
             if conditions is None:
                 return False
