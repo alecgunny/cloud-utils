@@ -1,4 +1,3 @@
-import os
 import re
 import time
 import typing
@@ -71,23 +70,6 @@ class K8sApiClient:
         # return client instantiated with configuration
         self._client = kubernetes.client.ApiClient(configuration)
 
-    def create_from_yaml(self, file: str):
-        with self._maybe_refresh() as body:
-            start_time = time.time()
-            while True:
-                try:
-                    response = kubernetes.utils.create_from_yaml(
-                        self._client, file
-                    )
-                    break
-                except MaxRetryError:
-                    if (time.time() - start_time) > 10:
-                        raise
-                    time.sleep(1)
-        if body:
-            raise RuntimeError(f"Encountered exception {body}")
-        return response
-
     @contextmanager
     def _maybe_refresh(self):
         body = {}
@@ -101,6 +83,72 @@ class K8sApiClient:
                     self.client.configuration.api_key["authorization"] = token
                 else:
                     raise RuntimeError("Unauthorized request to cluster")
+
+    def create_from_yaml(
+        self,
+        file: str,
+        repo: typing.Optional[str] = None,
+        branch: typing.Optional[str] = None,
+        namespace: str = "default",
+        ignore_if_exists: bool = True,
+        **kwargs,
+    ):
+        with self._maybe_refresh() as body:
+            # get deploy file content either from
+            # local file or from github repo. Parse
+            # yaml go template wildcards with kwargs
+            content = get_content(file, repo, branch, **kwargs)
+
+            failures = []
+            k8s_objects = []
+            for yml_document in yaml.safe_load_all(content):
+                start_time = time.time()
+                while (time.time() - start_time) < 10:
+                    # sometimes trying to connect to a freshly
+                    # created cluster can be a bit fickle,
+                    # so use this timeout to catch the MaxRetryError
+                    # a few times before raising an error
+                    try:
+                        # try to create k8s objects one at a time
+                        created = kubernetes.utils.create_from_dict(
+                            self._client,
+                            yml_document,
+                            namespace=namespace,
+                            **kwargs,
+                        )
+                        break
+                    except kubernetes.utils.FailToCreateError as failure:
+                        # kubernetes exception in creation. Keep track
+                        # of all that get raised and raise them at the end
+                        for exc in failure.api_exceptions:
+                            reason = yaml.safe_load(exc.body)["reason"]
+                            if reason != "AlreadyExists" or not ignore_if_exists:
+                                # if the problem was that the object already
+                                # exists and we indicated to ignore this
+                                # problem, we don't need to append the
+                                # exception
+                                failures.append(exc)
+                        # break here because there's no
+                        # point in trying to create again
+                        break
+                    except MaxRetryError:
+                        # catch this error a few times
+                        # before we decide it's fatal
+                        time.sleep(1)
+                else:
+                    # the object either couldn't create or hit
+                    # an api exception before the timeout,
+                    # so raise an error
+                    raise RuntimeError("Encountered too many retries")
+
+                k8s_objects.append(created)
+
+            if failures:
+                raise kubernetes.utils.FailToCreateError(failures)
+
+        if body:
+            raise RuntimeError(f"Encountered exception {body}")
+        return k8s_objects
 
     def remove_deployment(self, name: str, namespace: str = "default"):
         app_client = kubernetes.client.AppsV1Api(self._client)
@@ -207,87 +255,59 @@ class K8sApiClient:
             return status.desired_number_scheduled == status.number_ready
 
 
-@contextmanager
-def deploy_file(
+def get_content(
     file: str,
     repo: typing.Optional[str] = None,
     branch: typing.Optional[str] = None,
-    values: typing.Optional[typing.Dict[str, str]] = None,
-    ignore_if_exists: bool = True,
+    **kwargs,
 ):
     if repo is not None:
         if branch is None:
+            # if we didn't specify a branch, default to
+            # trying main first but try master next in
+            # case the repo hasn't changed yet
             branches = ["main", "master"]
         else:
+            # otherwise just use the specified branch
             branches = [branch]
 
         for branch in branches:
-            url_header = "https://raw.githubusercontent.com"
-            url = f"{url_header}/{repo}/{branch}/{file}"
-
+            url = f"https://raw.githubusercontent.com/{repo}/{branch}/{file}"
             try:
-                yaml_content = requests.get(url).content.decode("utf-8")
+                content = requests.get(url).content.decode("utf-8")
+                requests.raise_for_status()
+                break
             except Exception:
                 pass
-            else:
-                break
         else:
             raise ValueError(
-                f"Couldn't find file {file} at github repo {repo}, ",
-                "tried looking in branches {}".format(", ".join(branches)),
+                "Couldn't find file {} at github repo {} "
+                "in branches {}".format(file, repo, ", ".join(branches))
             )
     else:
         with open(file, "r") as f:
-            yaml_content = f.read()
+            content = f.read()
 
-    values = values or {}
-    values = values.copy()
-    try:
-        # try to load in values from file
-        values_file = values.pop("_file")
-    except KeyError:
-        pass
-    else:
-        # use explicitly passed values to overwrite
-        # values in file
-        with open(values_file, "r") as f:
-            values_map = yaml.safe_load(f)
-        values_map.update(values)
-        values = values_map
+    return sub_values(content, **kwargs)
 
-    # look for any Go variable indicators and try to
-    # fill them in with their value from `values`
+
+def sub_values(content: str, **kwargs):
+    match_re = re.compile("(?<={{ .Values.)[a-zA-Z0-9]+?(?= }})")
+    found = set()
+
     def replace_fn(match):
-        varname = re.search(
-            "(?<={{ .Values.)[a-zA-Z0-9]+?(?= }})", match.group(0)
-        ).group(0)
+        varname = match_re.search(match.group(0)).group(0)
+        found.add(varname)
         try:
-            return str(values[varname])
+            return str(kwargs[varname])
         except KeyError:
             raise ValueError(f"No value provided for wildcard {varname}")
 
-    yaml_content = re.sub("{{ .Values.[a-zA-Z0-9]+? }}", replace_fn, yaml_content)
+    content = re.sub("{{ .Values.[a-zA-Z0-9]+? }}", replace_fn, content)
 
-    # write formatted yaml to temporary file
-    with NamedTemporaryFile(mode="w", delete=False) as f:
-        f.write(yaml_content)
-        file = f.name
-
-    try:
-        try:
-            yield file
-        except kubernetes.utils.FailToCreateError as e:
-            if not ignore_if_exists:
-                # doesn't matter what the issue was,
-                # delete the temp files and raise
-                raise
-
-            # try to load api exception information
-            for exc in e.api_exceptions:
-                info = yaml.safe_load(exc.body)
-                if info["reason"] != "AlreadyExists":
-                    raise
-    finally:
-        # remove the temporary file no matter
-        # what happens
-        os.remove(file)
+    missing = set(kwargs) - found
+    if missing:
+        raise ValueError(
+            "Provided unused wildcard values: {}".format(", ".join(missing))
+        )
+    return content

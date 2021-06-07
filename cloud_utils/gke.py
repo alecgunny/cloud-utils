@@ -334,20 +334,29 @@ class Cluster(ManagerResource):
             self._k8s_client = K8sApiClient(self)
         return self._k8s_client
 
-    def deploy(self, file: str):
-        return self.k8s_client.create_from_yaml(file)
+    def deploy(
+        self,
+        file: str,
+        repo: typing.Optional[str] = None,
+        branch: typing.Optional[str] = None,
+        namespace: str = "default",
+        ignore_if_exists: bool = True,
+        **kwargs,
+    ):
+        return self.k8s_client.create_from_yaml(
+            file, repo, branch, namespace, ignore_if_exists, **kwargs
+        )
 
     def remove_deployment(self, name: str, namespace: str = "default"):
         return self.k8s_client.remove_deployment(name, namespace)
 
     def deploy_gpu_drivers(self) -> None:
-        with deploy_file(
+        self.deploy(
             "nvidia-driver-installer/cos/daemonset-preloaded.yaml",
             repo="GoogleCloudPlatform/container-engine-accelerators",
             branch="master",
             ignore_if_exists=True,
-        ) as f:
-            self.deploy(f)
+        )
         self.k8s_client.wait_for_daemon_set(name="nvidia-driver-installer")
 
 
