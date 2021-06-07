@@ -73,7 +73,17 @@ class K8sApiClient:
 
     def create_from_yaml(self, file: str):
         with self._maybe_refresh() as body:
-            response = kubernetes.utils.create_from_yaml(self._client, file)
+            start_time = time.time()
+            while True:
+                try:
+                    response = kubernetes.utils.create_from_yaml(
+                        self._client, file
+                    )
+                    break
+                except MaxRetryError:
+                    if (time.time() - start_time) > 10:
+                        raise
+                    time.sleep(1)
         if body:
             raise RuntimeError(f"Encountered exception {body}")
         return response
