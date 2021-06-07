@@ -274,8 +274,9 @@ def get_content(
         for branch in branches:
             url = f"https://raw.githubusercontent.com/{repo}/{branch}/{file}"
             try:
-                content = requests.get(url).content.decode("utf-8")
-                requests.raise_for_status()
+                response = requests.get(url)
+                response.raise_for_status()
+                content = response.content.decode()
                 break
             except Exception:
                 pass
