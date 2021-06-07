@@ -11,7 +11,7 @@ from google.auth.transport.requests import Request as AuthRequest
 from google.cloud import container_v1 as container
 from google.oauth2 import service_account
 
-from cloud_utils.k8s import K8sApiClient, deploy_file
+from cloud_utils.k8s import K8sApiClient
 from cloud_utils.utils import wait_for
 
 _credentials_type = typing.Optional[
