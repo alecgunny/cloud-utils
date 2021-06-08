@@ -111,10 +111,7 @@ class K8sApiClient:
                     try:
                         # try to create k8s objects one at a time
                         created = kubernetes.utils.create_from_dict(
-                            self._client,
-                            yml_document,
-                            namespace=namespace,
-                            **kwargs,
+                            self._client, yml_document, namespace=namespace
                         )
                         break
                     except kubernetes.utils.FailToCreateError as failure:
